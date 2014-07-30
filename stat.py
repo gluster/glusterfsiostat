@@ -6,115 +6,230 @@ import re
 import os
 import json
 import sys
+import time
 from optparse import OptionParser
 
 status, output=commands.getstatusoutput('mount')
 mountlines = output.split("\n")
 
 if status != 0:
-	print "Unable to gather mount statistics"
-	exit(1)
+    print "Unable to gather mount statistics"
+    exit(1)
 
 mntarr = []
+maxlen = -1
 
-for i in mountlines:
-	matchobj = re.search(r" type fuse.glusterfs \(.*\)$",i)
-	if matchobj:
-		i = i.replace(matchobj.group(),"")
-		i = i.split(" on ")
-		mntname = i[0]
-		mntpath = i[1]
-		temp = {}
-		temp["mount_path"] = mntpath
-		temp["name"] = mntname
-		mntarr.append(temp)
+def read_meta(dev):
+    for i in mountlines:
+        matchobj = re.search(r" type fuse.glusterfs \(.*\)$",i)
+        if matchobj:
+            i = i.replace(matchobj.group(),"")
+            i = i.split(" on ")
+            
+            mntname = i[0]
+            mntpath = i[1]
 
-for i in xrange(0,len(mntarr)):
-	os.chdir(mntarr[i]["mount_path"])
-	os.chdir(".meta")
-	os.chdir("graphs/active")
+            if(len(dev) > 0 and dev != mntname):
+                continue
+            
+            temp = {}
+            temp["mount_path"] = mntpath
+            temp["name"] = mntname
+            mntarr.append(temp)
 
-	status, output=commands.getstatusoutput("ls")
-	if status != 0:
-		print mntpath + ": components not accessible"
-		continue
-	
-	lsarr = output.split('\n')
+    for i in xrange(0,len(mntarr)):
+        os.chdir(mntarr[i]["mount_path"])
+        os.chdir(".meta")
+        os.chdir("graphs/active")
 
-	for j in lsarr:
-		io_stats_path = ""
-		status, output=commands.getstatusoutput("cat "+ j + "/type")
-		if output == "debug/io-stats":
-			os.chdir(j)
-			io_stats_path = os.getcwd()
-			break
-	if io_stats_path == "": continue
+        status, output=commands.getstatusoutput("ls")
+        if status != 0:
+            print mntpath + ": components not accessible"
+            continue
+        
+        lsarr = output.split('\n')
 
-	priv_content = commands.getstatusoutput("cat private")
+        for j in lsarr:
+            io_stats_path = ""
+            status, output=commands.getstatusoutput("cat "+ j + "/type")
+            if output == "debug/io-stats":
+                os.chdir(j)
+                io_stats_path = os.getcwd()
+                break
+        if io_stats_path == "": continue
 
-	priv_content = priv_content[1].split('\n')
+        priv_content = commands.getstatusoutput("cat private")
+        xl_name = commands.getstatusoutput("cat name")[1]
 
-	mntarr[i]["read_speed"] = {}
-	mntarr[i]["write_speed"] = {}
+        priv_content = priv_content[1].split('\n')
 
-	for j in priv_content:
+        mntarr[i]["fops"] = {}
+        mntarr[i]["data_read"] = {}
+        mntarr[i]["data_written"] = {}
 
-		match = re.search(r"write_speed\((.*)\) = (.*)$",j)
-		if(match):
-			mntarr[i]["read_speed"][match.group(1)] = match.group(2)
-		
-		match = re.search(r"read_speed\((.*)\) = (.*)$",j)
-		if(match):
-			mntarr[i]["write_speed"][match.group(1)] = match.group(2)
-		
-		match = re.search(r"data_read_cumulative = (.*)$",j)
-		if(match):
-			mntarr[i]["read_cumulative"] = match.group(1)
-		
-		match = re.search(r"data_read_incremental = (.*)$",j)
-		if(match):
-			mntarr[i]["read_incremental"] = match.group(1)
+        for j in priv_content:
 
-		match = re.search(r"data_written_cumulative = (.*)$",j)
-		if(match):
-			mntarr[i]["write_cumulative"] = match.group(1)
+            match = re.search(xl_name+r"\.(.*) = (.*),(.*),(.*),(.*),(.*)$",j)
+            if(match):
+                mntarr[i]["fops"][match.group(1)] = {}
+                mntarr[i]["fops"][match.group(1)]["count"] = match.group(2)
+                mntarr[i]["fops"][match.group(1)]["latency_sum"] = match.group(3)
+                mntarr[i]["fops"][match.group(1)]["min"] = match.group(4)
+                mntarr[i]["fops"][match.group(1)]["max"] = match.group(5)
+                mntarr[i]["fops"][match.group(1)]["avg"] = match.group(6)  
+                
 
-		match = re.search(r"data_written_incremental = (.*)$",j)
-		if(match):
-			mntarr[i]["write_incremental"] = match.group(1)
+            match = re.search(r"data_read = (.*)$",j)
+            if(match):
+                mntarr[i]["data_read"] = match.group(1)
+            
+            match = re.search(r"data_written = (.*)$",j)
+            if(match):
+                mntarr[i]["data_written"] = match.group(1)
 
 parser = OptionParser()
 
 parser.add_option("-j", "--json", action = "store_true", dest = "json", help = "Get extra output in json format", default = False)
+parser.add_option("-m", "--mb", action = "store_true", dest = "mb", help = "Get speed in MB/s", default = False)
+parser.add_option("-k", "--kb", action = "store_true", dest = "kb", help = "Get speed in KB/s", default = False)
+parser.add_option("-i", "--interval", action = "store_true", dest = "interval", help = "Get continuous stats with a fixed interval", default = False)
 
 (options, args) = parser.parse_args()
 
-if(len(mntarr) == 0):
-	print "No gluster mounts found."
-	exit(1)
+devcol = []
+readcol = []
+writecol = []
+opcol = []
+ropcol = []
+wopcol = []
+
+def max_length(arr):
+    
+    length = -1
+    
+    for i in xrange(0,len(arr)):
+        if(len(str(arr[i])) > length):
+            length = len(str(arr[i]))
+
+    return length    
+
+def fill_space(arr):
+    
+    maxlen = max_length(arr)
+    
+    for i in xrange(0,len(arr)):
+        for j in xrange(0, maxlen - len(str(arr[i]))):
+                arr[i] = str(arr[i]) + " "
+
+def calculate():
+
+    devcol.append("Device:")
+    if(options.mb == True):
+        readcol.append("MB_read/s")
+        writecol.append("MB_wrtn/s")
+    else:
+        readcol.append("kB_read/s")
+        writecol.append("kB_wrtn/s")
+
+    opcol.append("ops/s")
+    ropcol.append("rops/s")
+    wopcol.append("wops/s")
+
+
+    for i in xrange(0,len(mntarr)):
+
+        devcol.append(mntarr[i]["name"])
+
+        if(len(mntarr[i]["data_read"]) > 0 and int(mntarr[i]["fops"]["READ"]["latency_sum"]) > 0 ):
+            r_speed = ((int(mntarr[i]["data_read"])*1000000)/int(mntarr[i]["fops"]["READ"]["latency_sum"]))/1024
+        else:
+            r_speed = 0
+
+        if(len(mntarr[i]["data_written"]) > 0 and int(mntarr[i]["fops"]["WRITE"]["latency_sum"]) > 0):
+            w_speed = ((int(mntarr[i]["data_written"])*1000000)/int(mntarr[i]["fops"]["WRITE"]["latency_sum"]))/1024
+        else:
+            w_speed = 0
+
+        if(options.mb == True):
+            r_speed = float(r_speed)/1024
+            w_speed = float(w_speed)/1024
+
+        readcol.append(r_speed)
+        writecol.append(w_speed)
+
+        count = 0
+        total_latency = 0
+
+        for j in mntarr[i]["fops"]:
+            count = count + int(mntarr[i]["fops"][j]["count"])
+            total_latency = total_latency + int(mntarr[i]["fops"][j]["latency_sum"])
+
+        if(count == 0 or total_latency == 0):
+            opcol.append("0")
+        else:
+            opcol.append((count*1000000)/total_latency)
+
+        readcount = int(mntarr[i]["fops"]["READ"]["count"])
+        readlatency = int(mntarr[i]["fops"]["READ"]["latency_sum"])
+
+        writecount = int(mntarr[i]["fops"]["WRITE"]["count"])
+        writelatency = int(mntarr[i]["fops"]["WRITE"]["latency_sum"])
+
+        if(readcount == 0 or readlatency == 0):
+            ropcol.append("0")
+        else:
+            ropcol.append((readcount * 1000000) / readlatency)
+
+        if(writecount == 0 or writelatency == 0):
+            wopcol.append("0")
+        else:
+            wopcol.append((writecount * 1000000) / writelatency)
+
+dev = ""
+read_meta(dev)
 
 if(options.json == True):
-	print json.dumps(mntarr)
+    print json.dumps(mntarr)
+
+elif(options.interval):
+    pre = []
+
+    while True:
+        mntarr = []
+        read_meta(dev)
+        if(len(pre) > 0 and len(pre) == len(mntarr)):
+            pass
+        else:
+            calculate()
+            fill_space(devcol)
+            fill_space(readcol)
+            fill_space(writecol)
+            fill_space(opcol)
+            fill_space(ropcol)
+            fill_space(wopcol)
+
+            for i in xrange(0,len(devcol)):
+                sys.stdout.write(str(devcol[i]) + "\t" + str(readcol[i]) + "\t" + str(writecol[i]))
+                sys.stdout.write("\t" + str(opcol[i]) + "\t" + str(ropcol[i]) + "\t" + str(wopcol[i]) + "\n")
+
+        #pre = copy.deepcopy(mntarr)
+        time.sleep(1)
+
 else:
-	sys.stdout.write("Device:")
-	length = len(mntarr[i]["name"]) - 7
-	if(length > 0):
-		for x in xrange(0,length):
-			sys.stdout.write(" ")
+   
+    if(len(mntarr) == 0):
+        print "No gluster mounts found."
+        exit(1)
 
-	sys.stdout.write("    kB_read/s    kB_wrtn/s    kB_read    kB_wrtn\n")
-	for i in xrange(0,len(mntarr)):
-		if(len(mntarr[i]["read_speed"]) > 0):
-			r_speed = int(mntarr[i]["read_speed"][max(mntarr[i]["read_speed"].iterkeys())])/1024
-		else:
-			r_speed = 0
+    calculate()
+    
+    fill_space(devcol)
+    fill_space(readcol)
+    fill_space(writecol)
+    fill_space(opcol)
+    fill_space(ropcol)
+    fill_space(wopcol)
 
-		if(len(mntarr[i]["write_speed"]) > 0):
-			w_speed = int(mntarr[i]["write_speed"][max(mntarr[i]["write_speed"].iterkeys())])/1024
-		else:
-			w_speed = 0
-
-		sys.stdout.write(str(mntarr[i]["name"])+"    " + str(r_speed) + "    " + str(w_speed) + "    ")
-		sys.stdout.write(str(int(mntarr[i]["read_cumulative"])/1024) + "    ")
-		sys.stdout.write(str(int(mntarr[i]["write_cumulative"])/1024))
-		sys.stdout.write("\n")
+    for i in xrange(0,len(devcol)):
+        sys.stdout.write(str(devcol[i]) + "\t" + str(readcol[i]) + "\t" + str(writecol[i]))
+        sys.stdout.write("\t" + str(opcol[i]) + "\t" + str(ropcol[i]) + "\t" + str(wopcol[i]) + "\n")
