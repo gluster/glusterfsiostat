@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+    <head>
+    
+        <title>Line Chart</title>
+        <script src="RGraph/libraries/RGraph.common.core.js" ></script>
+        <script src="RGraph/libraries/RGraph.common.dynamic.js" ></script>
+        <script src="RGraph/libraries/RGraph.line.js" ></script>
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+    
+    </head>
+    <body>
+<div>
+    <div style="float:left;">   <canvas id="r_speed" width="600" height="300">[No canvas support]</canvas> </div>
+    <div style="float:left;">   <canvas id="w_speed" width="600" height="300">[No canvas support]</canvas> </div>
+</div>
+<br/><br/>
+<div>
+    <div style="float:left;">   <canvas id="rops/s" width="600" height="300">[No canvas support]</canvas> </div>
+    <div style="float:left;">   <canvas id="wops/s" width="600" height="300">[No canvas support]</canvas> </div>
+</div>
+<br/><br/>
+
+        <canvas id="ops/s" width="600" height="300">[No canvas support]</canvas>
+
+<script>
+
+    var datalock = 0;
+
+    window.onload = function ()
+    {
+        var mounts = {};
+
+        var chart_title = {
+            "r_speed" : "Read Speed",
+            "w_speed" : "Write Speed",
+            "rops/s" : "Read Operations Speed",
+            "wops/s" : "Write Operations Speed",
+            "ops/s" : "Overall Operations speed",
+        };
+
+        function getGraph(name, cid)
+        {
+            // After creating the chart, it's stored on the global window object
+            if (mounts[name][cid + "_obj"] == undefined) {
+                mounts[name][cid + "_obj"] = new RGraph.Line({
+                    id: cid,
+                    data: mounts[name][cid],
+                    options: {
+                        xticks: 100,
+                        background: {
+                            color: 'white',
+                            grid: {
+                                vlines: false,
+                                border: false
+                            }
+                        },
+                        labels:{
+                            above: false, 
+                        },
+                        title: {
+                            self: chart_title[cid],
+                            vpos: 0.5,
+                            xaxis: {
+                                self: 'Time',
+                                pos: 0.5
+                            }
+                        },
+                        gutter:{
+                            right: 60
+                        },
+                        colors: ['black'],
+                        linewidth: 0.5,
+                        yaxispos: 'right',
+                        xticks: 25,
+                        filled: true,
+                        numyticks: 2,
+                        tickmarks: null,
+                        ylabels: {
+                            count: 4,
+                            inside: false
+                        }
+                    }
+                })
+                
+                var grad = mounts[name][cid + "_obj"].context.createLinearGradient(0,0,0,250);
+                grad.addColorStop(0, '#efefef');
+                grad.addColorStop(0.9, 'rgba(0,0,0,0)');
+
+                mounts[name][cid + "_obj"].set('fillstyle', [grad]);
+            }
+
+            return mounts[name][cid + "_obj"];
+        }
+
+        function drawGraph (val, name, cid)
+        {
+            var _RG = RGraph;
+            if(val == undefined) return;
+
+            RGraph.clear(document.getElementById(cid));
+            
+            var graph = getGraph(name, cid);
+            graph.draw();
+
+            mounts[name][cid].push(val);
+            
+            if (mounts[name][cid].length > 60) {
+                mounts[name][cid] = _RG.array_shift(mounts[name][cid]);
+            }
+
+            if (RGraph.ISIE8) {
+                alert('[MSIE] Sorry, Internet Explorer 8 is not fast enough to support animated charts');
+            } else {
+                mounts[name][cid + "_obj"].original_data[0] = mounts[name][cid];
+                setTimeout(drawGraph, 50);
+            }
+        }
+
+        function dopoll () {
+            
+            $.getJSON('/data', function (data) {
+
+                while(datalock);
+
+                datalock = 1;
+
+                for (var i = 0; i < data.length; i++) {
+                
+                    var name = data[i]["name"] + " | " + data[i]["mount_path"]; 
+
+                    if(!(name in mounts)){
+                        mounts[name] = {};
+                        mounts[name]["r_speed"] = []
+                        mounts[name]["w_speed"] = []
+                        mounts[name]["rops/s"] = []
+                        mounts[name]["wops/s"] = []
+                        mounts[name]["ops/s"] = []
+
+                        for (var j=0; j<60; ++j) {
+
+                            mounts[name]["r_speed"].push(null);
+                            mounts[name]["w_speed"].push(null);
+                            mounts[name]["rops/s"].push(null);
+                            mounts[name]["wops/s"].push(null);
+                            mounts[name]["ops/s"].push(null);
+                        }
+
+                    }
+                    
+                    drawGraph(parseInt(data[i]["r_speed"]), name, "r_speed");
+                    drawGraph(parseInt(data[i]["w_speed"]), name, "w_speed");
+                    drawGraph(parseInt(data[i]["rops/s"]), name, "rops/s");
+                    drawGraph(parseInt(data[i]["wops/s"]), name, "wops/s");
+                    drawGraph(parseInt(data[i]["ops/s"]), name, "ops/s");
+                    
+                };
+
+                datalock = 0;
+                
+            });
+        }
+
+        setInterval(function(){ dopoll(); }, 1000);
+    }
+</script>
+
+    </body>
+</html>
