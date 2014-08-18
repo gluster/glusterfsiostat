@@ -4,7 +4,6 @@ from os import curdir, sep
 
 PORT_NUMBER = 8080
 
-
 import commands
 import re
 import os
@@ -68,6 +67,11 @@ def read_meta(dev):
         if io_stats_path == "": continue
 
         priv_content = commands.getstatusoutput("cat private")
+        if(len(priv_content[1])==0 or priv_content[1] == ""):
+            print "Profiling needs to be enabled on volume: " + mntarr[i]["name"]
+            mntarr[i] = None
+            continue
+
         xl_name = commands.getstatusoutput("cat name")[1]
 
         priv_content = priv_content[1].split('\n')
@@ -106,9 +110,12 @@ def statsthread():
     while True:
         mntarr = read_meta("")
 
-        if(len(pre) > 0):
+        if(len(pre) > 0 and len(pre)==len(mntarr)):
             
-            for i in xrange(0,len(mntarr)):
+            for i in xrange(0,len(pre)):
+                
+                if(mntarr[i] == None):
+                    continue
                 
                 if(mntarr[i]["mount_path"] != pre[i]["mount_path"]):
                     pass
@@ -156,9 +163,9 @@ def statsthread():
                     pre_total_latency = pre_total_latency + int(pre[i]["fops"][j]["latency_sum"])
 
                 if(cur_total_latency - pre_total_latency != 0):
-                    temp["ops/s"] = ((cur_count - pre_count)*1000000)/(cur_total_latency - pre_total_latency)
+                    temp["ops"] = ((cur_count - pre_count)*1000000)/(cur_total_latency - pre_total_latency)
                 else:
-                    temp["ops/s"] = "0"
+                    temp["ops"] = "0"
 
                 pre_readcount = int(pre[i]["fops"]["READ"]["count"])
                 pre_readlatency = int(pre[i]["fops"]["READ"]["latency_sum"])
@@ -171,15 +178,15 @@ def statsthread():
                 cur_writelatency = int(mntarr[i]["fops"]["WRITE"]["latency_sum"])
 
                 if(cur_readlatency - pre_readlatency != 0):
-                    temp["rops/s"] = ((cur_readcount-pre_readcount)*1000000)/(cur_readlatency - pre_readlatency)
+                    temp["rops"] = ((cur_readcount-pre_readcount)*1000000)/(cur_readlatency - pre_readlatency)
                 else:
-                    temp["rops/s"] = "0"
+                    temp["rops"] = "0"
                     
 
                 if(cur_writelatency - pre_writelatency != 0):
-                    temp["wops/s"] = ((cur_writecount-pre_writecount)*1000000)/(cur_writelatency - pre_writelatency)
+                    temp["wops"] = ((cur_writecount-pre_writecount)*1000000)/(cur_writelatency - pre_writelatency)
                 else:
-                    temp["wops/s"] = "0"                   
+                    temp["wops"] = "0"                   
 
 
                 statarr.append(temp)
@@ -239,10 +246,7 @@ class myHandler(BaseHTTPRequestHandler):
                 sendReply = True
 
             if sendReply == True:
-                print "vip " + curdir + sep + self.path 
-                print os.getcwd()
                 f = open(CWD + "/" + self.path)
-                print f
                 
                 self.send_response(200)
                 self.send_header('Content-type',mimetype)
@@ -251,7 +255,6 @@ class myHandler(BaseHTTPRequestHandler):
                 f.close()
             return
 
-            print sendReply
         except IOError, e:
             print e
             self.send_error(404,'File Not Found: %s' % self.path)

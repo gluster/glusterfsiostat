@@ -7,6 +7,7 @@ import os
 import json
 import sys
 import time
+import copy
 from optparse import OptionParser
 
 status, output=commands.getstatusoutput('mount')
@@ -59,6 +60,11 @@ def read_meta(dev):
         if io_stats_path == "": continue
 
         priv_content = commands.getstatusoutput("cat private")
+        if(len(priv_content[1])==0 or priv_content[1] == ""):
+            print "Profiling needs to be enabled on volume: " + mntarr[i]["name"]
+            mntarr[i] = None
+            continue
+
         xl_name = commands.getstatusoutput("cat name")[1]
 
         priv_content = priv_content[1].split('\n')
@@ -69,7 +75,7 @@ def read_meta(dev):
 
         for j in priv_content:
 
-            match = re.search(xl_name+r"\.(.*) = (.*),(.*),(.*),(.*),(.*)$",j)
+            match = re.search(xl_name+r"\.incremental\.(.*) = (.*),(.*),(.*),(.*),(.*)$",j)
             if(match):
                 mntarr[i]["fops"][match.group(1)] = {}
                 mntarr[i]["fops"][match.group(1)]["count"] = match.group(2)
@@ -79,11 +85,11 @@ def read_meta(dev):
                 mntarr[i]["fops"][match.group(1)]["avg"] = match.group(6)  
                 
 
-            match = re.search(r"data_read = (.*)$",j)
+            match = re.search(r"incremental.data_read = (.*)$",j)
             if(match):
                 mntarr[i]["data_read"] = match.group(1)
             
-            match = re.search(r"data_written = (.*)$",j)
+            match = re.search(r"incremental.data_written = (.*)$",j)
             if(match):
                 mntarr[i]["data_written"] = match.group(1)
 
@@ -137,6 +143,9 @@ def calculate():
 
 
     for i in xrange(0,len(mntarr)):
+
+        if(mntarr[i] == None):
+            continue
 
         devcol.append(mntarr[i]["name"])
 
@@ -197,11 +206,85 @@ elif(options.interval):
     while True:
         mntarr = []
         read_meta(dev)
-        if(len(pre) > 0 and len(pre) == len(mntarr)):
-            pass
-        else:
-            calculate()
-            fill_space(devcol)
+
+        devcol = []
+        readcol = []
+        writecol = []
+        opcol = []
+        ropcol = []
+        wopcol = []
+
+        print ""
+
+        if(len(pre) > 0 and len(pre)==len(mntarr)):
+            
+            for i in xrange(0,len(pre)):
+
+                if(mntarr[i] == None):
+                    continue
+                
+                if(mntarr[i]["mount_path"] != pre[i]["mount_path"]):
+                    pass
+
+                devcol.append(mntarr[i]["name"])
+
+                pre_value = int(pre[i]["data_read"])
+                cur_value = int(mntarr[i]["data_read"])
+                pre_time = int(pre[i]["fops"]["READ"]["latency_sum"])
+                cur_time = int(mntarr[i]["fops"]["READ"]["latency_sum"])
+
+                if(cur_time - pre_time != 0 ):
+                    readcol.append((((cur_value - pre_value)*1000000)/(cur_time - pre_time))/1024)
+                else:
+                    readcol.append("0")
+
+                pre_value = int(pre[i]["data_written"])
+                cur_value = int(mntarr[i]["data_written"])
+                pre_time = int(pre[i]["fops"]["WRITE"]["latency_sum"])
+                cur_time = int(mntarr[i]["fops"]["WRITE"]["latency_sum"])
+
+                if(cur_time - pre_time != 0 ):
+                    writecol.append((((cur_value - pre_value)*1000000)/(cur_time - pre_time))/1024)
+                else:
+                    writecol.append("0")
+
+                pre_count = 0
+                pre_total_latency = 0
+                cur_count = 0
+                cur_total_latency = 0
+
+                for j in mntarr[i]["fops"]:
+                    cur_count = cur_count + int(mntarr[i]["fops"][j]["count"])
+                    cur_total_latency = cur_total_latency + int(mntarr[i]["fops"][j]["latency_sum"])
+                    pre_count = pre_count + int(pre[i]["fops"][j]["count"])
+                    pre_total_latency = pre_total_latency + int(pre[i]["fops"][j]["latency_sum"])
+
+                if(cur_total_latency - pre_total_latency != 0):
+                    opcol.append(((cur_count - pre_count)*1000000)/(cur_total_latency - pre_total_latency))
+                else:
+                    opcol.append("0")
+
+                pre_readcount = int(pre[i]["fops"]["READ"]["count"])
+                pre_readlatency = int(pre[i]["fops"]["READ"]["latency_sum"])
+                cur_readcount = int(mntarr[i]["fops"]["READ"]["count"])
+                cur_readlatency = int(mntarr[i]["fops"]["READ"]["latency_sum"])
+
+                pre_writecount = int(pre[i]["fops"]["WRITE"]["count"])
+                pre_writelatency = int(pre[i]["fops"]["WRITE"]["latency_sum"])
+                cur_writecount = int(mntarr[i]["fops"]["WRITE"]["count"])
+                cur_writelatency = int(mntarr[i]["fops"]["WRITE"]["latency_sum"])
+
+                if(cur_readlatency - pre_readlatency != 0):
+                    ropcol.append(((cur_readcount-pre_readcount)*1000000)/(cur_readlatency - pre_readlatency))
+                else:
+                    ropcol.append("0")
+                    
+
+                if(cur_writelatency - pre_writelatency != 0):
+                    wopcol.append(((cur_writecount-pre_writecount)*1000000)/(cur_writelatency - pre_writelatency))
+                else:
+                    wopcol.append("0")                   
+
             fill_space(readcol)
             fill_space(writecol)
             fill_space(opcol)
@@ -212,7 +295,7 @@ elif(options.interval):
                 sys.stdout.write(str(devcol[i]) + "\t" + str(readcol[i]) + "\t" + str(writecol[i]))
                 sys.stdout.write("\t" + str(opcol[i]) + "\t" + str(ropcol[i]) + "\t" + str(wopcol[i]) + "\n")
 
-        #pre = copy.deepcopy(mntarr)
+        pre = copy.deepcopy(mntarr)
         time.sleep(1)
 
 else:

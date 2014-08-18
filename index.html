@@ -6,45 +6,51 @@
         <script src="RGraph/libraries/RGraph.common.core.js" ></script>
         <script src="RGraph/libraries/RGraph.common.dynamic.js" ></script>
         <script src="RGraph/libraries/RGraph.line.js" ></script>
-        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+
+        <link href="bootstrap/css/bootstrap.min.css" rel="stylesheet">
+        <link href="bootstrap/css/dashboard.css" rel="stylesheet">
+
     
     </head>
     <body>
-<div>
-    <div style="float:left;">   <canvas id="r_speed" width="600" height="300">[No canvas support]</canvas> </div>
-    <div style="float:left;">   <canvas id="w_speed" width="600" height="300">[No canvas support]</canvas> </div>
-</div>
-<br/><br/>
-<div>
-    <div style="float:left;">   <canvas id="rops/s" width="600" height="300">[No canvas support]</canvas> </div>
-    <div style="float:left;">   <canvas id="wops/s" width="600" height="300">[No canvas support]</canvas> </div>
-</div>
-<br/><br/>
 
-        <canvas id="ops/s" width="600" height="300">[No canvas support]</canvas>
-
+    <div class="navbar navbar-inverse navbar-fixed-top" role="navigation">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="#">GlusterFS I/O Monitoring tool</a>
+        </div>
+      </div>
+    </div>
 <script>
 
-    var datalock = 0;
+    var datalock = 0, sidebar_count = 0;
+    var mounts = {};
 
     window.onload = function ()
     {
-        var mounts = {};
-
+        
         var chart_title = {
-            "r_speed" : "Read Speed",
-            "w_speed" : "Write Speed",
-            "rops/s" : "Read Operations Speed",
-            "wops/s" : "Write Operations Speed",
-            "ops/s" : "Overall Operations speed",
+            "r_speed" : "Read Speed (kB/s)",
+            "w_speed" : "Write Speed (kB/s)",
+            "rops" : "Read Operations Speed",
+            "wops" : "Write Operations Speed",
+            "ops" : "Overall Operations speed",
         };
 
         function getGraph(name, cid)
         {
             // After creating the chart, it's stored on the global window object
             if (mounts[name][cid + "_obj"] == undefined) {
+
                 mounts[name][cid + "_obj"] = new RGraph.Line({
-                    id: cid,
+                 
+                    id: name.replace(/[^a-z0-9]/gi, "") + "_" + cid ,
                     data: mounts[name][cid],
                     options: {
                         xticks: 100,
@@ -88,6 +94,7 @@
                 grad.addColorStop(0.9, 'rgba(0,0,0,0)');
 
                 mounts[name][cid + "_obj"].set('fillstyle', [grad]);
+
             }
 
             return mounts[name][cid + "_obj"];
@@ -98,7 +105,7 @@
             var _RG = RGraph;
             if(val == undefined) return;
 
-            RGraph.clear(document.getElementById(cid));
+            RGraph.clear($("#"+name.replace(/[^a-z0-9]/gi, "") + "_" + cid)[0]);
             
             var graph = getGraph(name, cid);
             graph.draw();
@@ -133,27 +140,52 @@
                         mounts[name] = {};
                         mounts[name]["r_speed"] = []
                         mounts[name]["w_speed"] = []
-                        mounts[name]["rops/s"] = []
-                        mounts[name]["wops/s"] = []
-                        mounts[name]["ops/s"] = []
+                        mounts[name]["rops"] = []
+                        mounts[name]["wops"] = []
+                        mounts[name]["ops"] = []
 
                         for (var j=0; j<60; ++j) {
 
                             mounts[name]["r_speed"].push(null);
                             mounts[name]["w_speed"].push(null);
-                            mounts[name]["rops/s"].push(null);
-                            mounts[name]["wops/s"].push(null);
-                            mounts[name]["ops/s"].push(null);
+                            mounts[name]["rops"].push(null);
+                            mounts[name]["wops"].push(null);
+                            mounts[name]["ops"].push(null);
                         }
+
+                    }
+
+                    if($("#side_" + name.replace(/[^a-z0-9]/gi, "")).length == 0){
+
+                        var canvas_entry = '<canvas id="' + name.replace(/[^a-z0-9]/gi, "")+'_r_speed" width="600" height="300">[No canvas support]</canvas>';
+                        canvas_entry += '<canvas id="' + name.replace(/[^a-z0-9]/gi, "")+'_w_speed" width="600" height="300">[No canvas support]</canvas>';
+                        canvas_entry += '<canvas id="' + name.replace(/[^a-z0-9]/gi, "")+'_rops" width="600" height="300">[No canvas support]</canvas>';
+                        canvas_entry += '<canvas id="' + name.replace(/[^a-z0-9]/gi, "")+'_wops" width="600" height="300">[No canvas support]</canvas>';
+                        canvas_entry += '<canvas id="' + name.replace(/[^a-z0-9]/gi, "")+'_ops" width="600" height="300">[No canvas support]</canvas>';
+
+                        if(sidebar_count <= 0)
+                            $("#dashboard_mounts").append("<div id=\"mount_"+ name.replace(/[^a-z0-9]/gi, "") +"\"> Mount Point: <b>"+ data[i]["mount_path"] +"</b> <br/></div>");
+                        else
+                            $("#dashboard_mounts").append("<div id=\"mount_"+ name.replace(/[^a-z0-9]/gi, "") +"\" style=\"display:none;\"> Mount Point: <b>"+ data[i]["mount_path"] +"</b> <br/></div>");
+
+                        $("#mount_" + name.replace(/[^a-z0-9]/gi, "") + "").append(canvas_entry);
+                        
+                        if(sidebar_count <= 0)
+                            var sidebar_entry = "<li class='active' onclick='labelclick(\""+name+"\")' id=\"side_" + name.replace(/[^a-z0-9]/gi, "") + "\"><a href=\"#\">" + name + " </a></li>";
+                        else
+                            var sidebar_entry = "<li onclick='labelclick(\""+name+"\")' id=\"side_" + name.replace(/[^a-z0-9]/gi, "") + "\"><a href=\"#\">" + name + " </a></li>";
+
+                        $("#sidebar_mountlist").append(sidebar_entry);
+                        ++sidebar_count;
 
                     }
                     
                     drawGraph(parseInt(data[i]["r_speed"]), name, "r_speed");
                     drawGraph(parseInt(data[i]["w_speed"]), name, "w_speed");
-                    drawGraph(parseInt(data[i]["rops/s"]), name, "rops/s");
-                    drawGraph(parseInt(data[i]["wops/s"]), name, "wops/s");
-                    drawGraph(parseInt(data[i]["ops/s"]), name, "ops/s");
-                    
+                    drawGraph(parseInt(data[i]["rops"]), name, "rops");
+                    drawGraph(parseInt(data[i]["wops"]), name, "wops");
+                    drawGraph(parseInt(data[i]["ops"]), name, "ops");
+
                 };
 
                 datalock = 0;
@@ -163,7 +195,40 @@
 
         setInterval(function(){ dopoll(); }, 1000);
     }
+
+    function labelclick (name) {
+            for (var n in window.mounts) {
+                $("#mount_" + n.replace(/[^a-z0-9]/gi, "")).hide();
+                $("#side_" + n.replace(/[^a-z0-9]/gi, "")).removeClass("active");                
+            }
+            $("#mount_" + name.replace(/[^a-z0-9]/gi, "")).show();
+            $("#side_" + name.replace(/[^a-z0-9]/gi, "")).addClass("active");
+        }
+
 </script>
+
+<div class="container-fluid">
+    <div class="row">
+
+        <div class="col-sm-3 col-md-2 sidebar">
+          <ul id="sidebar_mountlist" class="nav nav-sidebar">   </ul>
+        </div>
+
+<!-- Side bar ends
+ -->
+
+        <div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+        <h1 class="page-header">Dashboard</h1>
+
+        <div id="dashboard_mounts"></div>
+        </div>
+
+</div>
+</div>
+
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+<script src="bootstrap/js/bootstrap.min.js"></script>
 
     </body>
 </html>
