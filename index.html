@@ -38,9 +38,17 @@
         var chart_title = {
             "r_speed" : "Read Speed (kB/s)",
             "w_speed" : "Write Speed (kB/s)",
-            "rops" : "Read Operations Speed",
-            "wops" : "Write Operations Speed",
-            "ops" : "Overall Operations speed",
+            "rops" : "Read Operations Speed (rops/s)",
+            "wops" : "Write Operations Speed (wops/s)",
+            "ops" : "Overall Operations speed (ops/s)",
+        };
+
+        var yaxis_title = {
+            "r_speed" : "kB",
+            "w_speed" : "kB",
+            "rops" : "",
+            "wops" : "",
+            "ops" : "",
         };
 
         function getGraph(name, cid)
@@ -68,7 +76,11 @@
                             self: chart_title[cid],
                             vpos: 0.5,
                             xaxis: {
-                                self: 'Time',
+                                self: 'Time(s)',
+                                pos: 0.5
+                            },
+                            yaxis: {
+                                self: yaxis_title[cid],
                                 pos: 0.5
                             }
                         },
